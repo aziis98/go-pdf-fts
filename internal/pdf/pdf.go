@@ -100,7 +100,17 @@ func (e *Extractor) ExtractText(pdfPath string) (string, error) {
 	return allText.String(), nil
 }
 
-var removeDiacritics = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+var removeDiacritics = transform.Chain(
+	norm.NFD,
+	runes.Remove(runes.In(unicode.Mn)),
+	runes.Map(func(r rune) rune {
+		if r == '\u2014' { // Em dash (—)
+			return '-'
+		}
+		return r
+	}),
+	norm.NFC,
+)
 
 func normalizeUnicode(s string) string {
 	result, _, err := transform.String(removeDiacritics, s)

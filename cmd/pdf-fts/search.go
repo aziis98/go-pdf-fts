@@ -68,12 +68,10 @@ func runSearchCommand(queryTerm string, limit int) error {
 	resultBoxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("3")).
-		Padding(0, 1).
-		Width(100 - 2)
+		Padding(0, 1)
 
 	snippetStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("250")).
-		Width(100 - 2 - 4)
+		Foreground(lipgloss.Color("250"))
 
 	countStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("10")).

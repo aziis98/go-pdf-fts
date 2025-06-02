@@ -2,16 +2,14 @@ package ui
 
 import (
 	"fmt"
-	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/aziis98/pdf-fts/internal/database"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -20,13 +18,39 @@ var (
 	spaceNormalizer = regexp.MustCompile(`\s+`)
 
 	// Lipgloss styles
-	docStyle         = lipgloss.NewStyle().Margin(1, 2)
-	titleStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true) // Magenta-ish
-	filePathStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // Dim gray
-	snippetStyle     = lipgloss.NewStyle()
-	highlightStyle   = lipgloss.NewStyle().Background(lipgloss.Color("220")).Foreground(lipgloss.Color("0")) // Yellow bg, black text
-	helpStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).MarginTop(1)
-	loadingTextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	docStyle = lipgloss.NewStyle().
+			Margin(1, 2, 0, 2)
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("63")).
+			Bold(true)
+	filePathStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240"))
+	snippetStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("250"))
+	highlightStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("220")).
+			Foreground(lipgloss.Color("0"))
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241"))
+	loadingTextStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("205"))
+	searchBoxStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("10")).
+			Bold(true).
+			Padding(0, 1)
+	separatorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("3"))
+	resultBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("3")).
+			Padding(0, 1).
+			Width(100 - 2)
+	countStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("10")).
+			Bold(true)
+	noResultsStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("9")).
+			Bold(true)
 )
 
 // UI handles the interactive terminal user interface
@@ -54,134 +78,34 @@ func (u *UI) HandleLiveSearchCommand() error {
 
 // --- Bubble Tea Model for Live Search ---
 
-type searchResultItem struct {
-	Path    string
+type fileResult struct {
+	Path  string
+	Pages []pageResult
+}
+
+type pageResult struct {
 	PageNum int
 	Snippet string
-	Query   string // Store query for highlighting
-}
-
-func (i searchResultItem) Title() string {
-	filename := filepath.Base(i.Path)
-	if i.PageNum > 0 {
-		return fmt.Sprintf("%s (page %d)", filename, i.PageNum)
-	}
-	return filename
-}                                              // Display filename with page number as title
-func (i searchResultItem) Description() string { return i.Path } // Full path as description
-func (i searchResultItem) FilterValue() string { return i.Path + " " + i.Snippet }
-
-// Custom item delegate for rendering search results
-type itemDelegate struct{}
-
-func (d itemDelegate) Height() int                               { return 3 } // Title + Snippet + blank line
-func (d itemDelegate) Spacing() int                              { return 1 }
-func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
-func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
-	item, ok := listItem.(searchResultItem)
-	if !ok {
-		return
-	}
-
-	fileName := titleStyle.Render(item.Title())
-	filePath := filePathStyle.Render("  " + item.Path) // Indent path slightly
-
-	// Simple snippet highlighting (case-insensitive for query terms)
-	lowerQuery := strings.ToLower(item.Query)
-	var highlightedSnippet strings.Builder
-
-	if len(lowerQuery) > 0 { // Only highlight if there's a query
-		queryTerms := strings.Fields(lowerQuery) // Split query into terms for individual highlighting
-
-		// Create a map to quickly check if a part of the snippet is a query term
-		termMap := make(map[string]bool)
-		for _, term := range queryTerms {
-			termMap[term] = true
-		}
-
-		// Iterate through the snippet, word by word, to highlight query terms
-		words := strings.Fields(item.Snippet)           // Split snippet into words
-		originalWords := getOriginalWords(item.Snippet) // Get words with original casing
-
-		currentPos := 0
-		for i, word := range words {
-			// Find the original word corresponding to this potentially lowercased word
-			originalWord := ""
-			if i < len(originalWords) {
-				originalWord = originalWords[i]
-			} else {
-				originalWord = word // Fallback, should not happen if getOriginalWords is correct
-			}
-
-			startIdx := strings.Index(item.Snippet[currentPos:], originalWord) + currentPos
-			if startIdx < currentPos { // Should not happen
-				highlightedSnippet.WriteString(originalWord + " ")
-				currentPos += len(originalWord) + 1
-				continue
-			}
-
-			// Append text before the current word
-			if startIdx > currentPos {
-				highlightedSnippet.WriteString(item.Snippet[currentPos:startIdx])
-			}
-
-			if termMap[strings.ToLower(word)] {
-				highlightedSnippet.WriteString(highlightStyle.Render(originalWord))
-			} else {
-				highlightedSnippet.WriteString(originalWord)
-			}
-			highlightedSnippet.WriteString(" ") // Add space after word
-			currentPos = startIdx + len(originalWord)
-		}
-		// Append any remaining part of the snippet
-		if currentPos < len(item.Snippet) {
-			highlightedSnippet.WriteString(item.Snippet[currentPos:])
-		}
-
-	} else {
-		highlightedSnippet.WriteString(item.Snippet) // No query, no highlighting
-	}
-
-	str := fmt.Sprintf("%s\n%s\n  %s", fileName, filePath, snippetStyle.Render(highlightedSnippet.String()))
-
-	fmt.Fprint(w, docStyle.Render(str))
-}
-
-// getOriginalWords splits a string by spaces while preserving the original casing of the words.
-func getOriginalWords(s string) []string {
-	var words []string
-	var currentWord strings.Builder
-	for _, r := range s {
-		if r == ' ' {
-			if currentWord.Len() > 0 {
-				words = append(words, currentWord.String())
-				currentWord.Reset()
-			}
-		} else {
-			currentWord.WriteRune(r)
-		}
-	}
-	if currentWord.Len() > 0 {
-		words = append(words, currentWord.String())
-	}
-	return words
 }
 
 type liveSearchModel struct {
 	textInput textinput.Model
-	list      list.Model
 	spinner   spinner.Model
+	viewport  viewport.Model
 	searching bool
 	width     int
 	height    int
 	err       error
 	db        *database.DB
 	verbose   bool
+	results   []fileResult
+	query     string
 }
 
 type searchResultsMsg struct {
-	items []list.Item
-	err   error
+	results []fileResult
+	query   string
+	err     error
 }
 
 type searchErrorMsg struct{ err error }
@@ -193,31 +117,25 @@ func (u *UI) initialLiveSearchModel() liveSearchModel {
 	ti.CharLimit = 156
 	ti.Width = 50 // Initial width, will be updated
 
-	// List setup
-	delegate := itemDelegate{}
-	resultList := list.New([]list.Item{}, delegate, 0, 0) // Width/height set in Update
-	resultList.Title = "Search Results"
-	resultList.SetShowStatusBar(false)    // We'll manage status ourselves
-	resultList.SetFilteringEnabled(false) // We do searching via DB
-	resultList.Styles.Title = titleStyle
-	resultList.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{
-			key.NewBinding(key.WithKeys("ctrl+c", "esc"), key.WithHelp("ctrl+c/esc", "quit")),
-			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select (NYI)")),
-		}
-	}
-
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = loadingTextStyle
 
+	vp := viewport.New(78, 10) // Initial size, will be updated
+	vp.Style = lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		PaddingRight(2)
+
 	return liveSearchModel{
+		width:     80,
 		textInput: ti,
-		list:      resultList,
 		spinner:   s,
+		viewport:  vp,
 		searching: false,
 		db:        u.db,
 		verbose:   u.verbose,
+		results:   []fileResult{},
 	}
 }
 
@@ -232,13 +150,14 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.textInput.Width = msg.Width - 20 // Leave some margin
 
-		// Update text input width
-		m.textInput.Width = msg.Width - 4
-
-		// Update list dimensions
-		listHeight := msg.Height - 6 // Leave room for input and help
-		m.list.SetSize(msg.Width-4, listHeight)
+		// Update viewport size - reserve space for header, search box, and help
+		headerHeight := 4 // Header + search box + spacing
+		footerHeight := 2 // Help text
+		availableHeight := m.height - headerHeight - footerHeight
+		m.viewport.Width = msg.Width - 4
+		m.viewport.Height = max(5, availableHeight)
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -247,21 +166,45 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			// Handle item selection here if needed
 			return m, nil
+		case "up", "k":
+			// Let viewport handle scrolling
+			m.viewport.ScrollUp(1)
+		case "down", "j":
+			// Let viewport handle scrolling
+			m.viewport.ScrollDown(1)
+		case "home":
+			// Go to top
+			m.viewport.GotoTop()
+		case "end":
+			// Go to bottom
+			m.viewport.GotoBottom()
+		case "pgup":
+			// Page up
+			m.viewport.PageUp()
+		case "pgdn":
+			// Page down
+			m.viewport.PageDown()
 		}
 
 	case searchResultsMsg:
 		m.searching = false
-		m.list.SetItems(msg.items)
+		m.results = msg.results
+		m.query = msg.query
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
 			m.err = nil
 		}
+		// Update viewport content and reset to top
+		m.viewport.SetContent(m.renderResults())
+		m.viewport.GotoTop()
 
 	case searchErrorMsg:
 		m.searching = false
 		m.err = msg.err
-		m.list.SetItems([]list.Item{})
+		m.results = []fileResult{}
+		m.viewport.SetContent("")
+		m.viewport.GotoTop()
 	}
 
 	// Update text input
@@ -274,20 +217,22 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	newValue := m.textInput.Value()
 	if oldValue != newValue {
 		if strings.TrimSpace(newValue) == "" {
-			m.list.SetItems([]list.Item{})
+			m.results = []fileResult{}
 			m.err = nil
+			m.viewport.SetContent("")
+			m.viewport.GotoTop()
 		} else {
 			m.searching = true
 			cmds = append(cmds, m.performSearchCmd(newValue))
 		}
 	}
 
-	// Update list
-	m.list, cmd = m.list.Update(msg)
-	cmds = append(cmds, cmd)
-
 	// Update spinner
 	m.spinner, cmd = m.spinner.Update(msg)
+	cmds = append(cmds, cmd)
+
+	// Update viewport
+	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
@@ -295,34 +240,60 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m liveSearchModel) View() string {
 	// Search input
-	searchBox := fmt.Sprintf("Search: %s", m.textInput.View())
+	content := searchBoxStyle.Render(fmt.Sprintf("Search: %s", m.textInput.View())) + "\n"
 
-	// Status line
-	var status string
+	// Status and results
 	if m.searching {
-		status = m.spinner.View() + " Searching..."
+		content += m.spinner.View() + " Searching...\n"
 	} else if m.err != nil {
-		status = fmt.Sprintf("Error: %v", m.err)
+		content += fmt.Sprintf(" Error: %v\n", m.err)
+	} else if len(m.results) == 0 && strings.TrimSpace(m.textInput.Value()) != "" {
+		content += helpStyle.Render(" No results found.") + "\n"
+	} else if len(m.results) > 0 {
+		totalResults := len(m.results)
+		content += helpStyle.Render(fmt.Sprintf(" Found %d result(s)", totalResults)) + "\n"
 	} else {
-		itemCount := len(m.list.Items())
-		if itemCount == 0 && strings.TrimSpace(m.textInput.Value()) != "" {
-			status = "No results found"
-		} else if itemCount > 0 {
-			status = fmt.Sprintf("Found %d result(s)", itemCount)
+		content += "\n"
+	}
+
+	// Always show viewport (it will be empty if no results)
+	content += m.viewport.View()
+
+	// Help text
+	content += "\n\n" + helpStyle.Render("Press ctrl+c/esc to quit • Enter to select (NYI)")
+
+	return docStyle.Render(content)
+}
+
+func (m liveSearchModel) highlightMatches(snippet, queryTerm string) string {
+	highlightStyle := lipgloss.NewStyle().
+		Background(lipgloss.AdaptiveColor{Light: "7", Dark: "8"}).
+		Foreground(lipgloss.AdaptiveColor{Light: "0", Dark: "15"}).
+		Bold(true)
+
+	// Handle SQLite FTS highlighting markers [HL] and [/HL]
+	highlighted := regexp.MustCompile(`\[HL\](.*?)\[/HL\]`).ReplaceAllStringFunc(snippet, func(match string) string {
+		text := regexp.MustCompile(`\[HL\](.*?)\[/HL\]`).FindStringSubmatch(match)
+		if len(text) > 1 {
+			return highlightStyle.Render(text[1])
+		}
+		return match
+	})
+
+	// If no FTS markers, try to highlight the query term manually
+	if highlighted == snippet && queryTerm != "" {
+		words := strings.Fields(strings.ToLower(queryTerm))
+		for _, word := range words {
+			if len(word) > 2 {
+				re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(word) + `\b`)
+				highlighted = re.ReplaceAllStringFunc(highlighted, func(match string) string {
+					return highlightStyle.Render(match)
+				})
+			}
 		}
 	}
 
-	// Help text
-	help := helpStyle.Render("Press ctrl+c/esc to quit • Enter to select (NYI)")
-
-	// Combine all elements
-	content := fmt.Sprintf("%s\n\n%s\n\n%s\n%s",
-		searchBox,
-		m.list.View(),
-		status,
-		help)
-
-	return docStyle.Render(content)
+	return highlighted
 }
 
 func (m liveSearchModel) performSearchCmd(queryTerm string) tea.Cmd {
@@ -330,17 +301,17 @@ func (m liveSearchModel) performSearchCmd(queryTerm string) tea.Cmd {
 		if m.db == nil {
 			return searchErrorMsg{err: fmt.Errorf("database not initialized")}
 		}
-		items, err := m.queryDBForLiveSearch(queryTerm, 5) // Limit to 20 for TUI
+		results, err := m.queryDBForLiveSearch(queryTerm, 10)
 		if err != nil {
 			return searchErrorMsg{err: err}
 		}
-		return searchResultsMsg{items: items}
+		return searchResultsMsg{results: results, query: queryTerm}
 	}
 }
 
-func (m liveSearchModel) queryDBForLiveSearch(queryTerm string, limit int) ([]list.Item, error) {
+func (m liveSearchModel) queryDBForLiveSearch(queryTerm string, limit int) ([]fileResult, error) {
 	if queryTerm == "" {
-		return []list.Item{}, nil
+		return []fileResult{}, nil
 	}
 
 	searchResults, err := m.db.Search(queryTerm, limit)
@@ -348,21 +319,103 @@ func (m liveSearchModel) queryDBForLiveSearch(queryTerm string, limit int) ([]li
 		return nil, fmt.Errorf("search query failed: %w", err)
 	}
 
-	var results []list.Item
-	for _, result := range searchResults {
-		// Further clean snippet from FTS, replace markers with lipgloss styling later
-		snippet := strings.ReplaceAll(result.Snippet, "\n", " ")
-		snippet = spaceNormalizer.ReplaceAllString(snippet, " ")
-		snippet = strings.ReplaceAll(snippet, "[HL]", "") // Placeholder, actual highlight in delegate
-		snippet = strings.ReplaceAll(snippet, "[/HL]", "")
+	// Group results by file path while maintaining order
+	resultMap := make(map[string]*fileResult)
+	var groupedResults []fileResult
 
-		results = append(results, searchResultItem{
-			Path:    result.Path,
+	for _, result := range searchResults {
+		if _, exists := resultMap[result.Path]; !exists {
+			fileRes := fileResult{Path: result.Path, Pages: []pageResult{}}
+			groupedResults = append(groupedResults, fileRes)
+			resultMap[result.Path] = &groupedResults[len(groupedResults)-1]
+		}
+
+		pageRes := pageResult{
 			PageNum: result.PageNum,
-			Snippet: strings.TrimSpace(snippet),
-			Query:   queryTerm,
-		})
+			Snippet: result.Snippet,
+		}
+		resultMap[result.Path].Pages = append(resultMap[result.Path].Pages, pageRes)
 	}
 
-	return results, nil
+	return groupedResults, nil
+}
+
+func (m liveSearchModel) renderResults() string {
+	if len(m.results) == 0 {
+		return ""
+	}
+
+	var content strings.Builder
+
+	// Render all results (viewport will handle scrolling)
+	for _, fileResult := range m.results {
+		// Format filename
+		base := filepath.Base(fileResult.Path)
+		maxBaseLen := 82
+		if len(base) > maxBaseLen {
+			base = base[:maxBaseLen-3] + "..."
+		}
+
+		fileStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("3")).
+			Bold(true)
+
+		pathStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Italic(true)
+
+		pageStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("12")).
+			Bold(true)
+
+		baseWithPath := fmt.Sprintf("%s\n   %s",
+			fileStyle.Render(base),
+			pathStyle.Render(filepath.Dir(fileResult.Path)+"/"))
+
+		// Combine page snippets
+		var pageSnippets []string
+		for _, page := range fileResult.Pages {
+			snippet := strings.ReplaceAll(page.Snippet, "\n", " ")
+			snippet = spaceNormalizer.ReplaceAllString(snippet, " ")
+			highlightedSnippet := m.highlightMatches(snippet, m.query)
+
+			formattedSnippet := fmt.Sprintf("%s: %s",
+				pageStyle.Render(fmt.Sprintf("Page %d", page.PageNum)),
+				highlightedSnippet)
+			pageSnippets = append(pageSnippets, formattedSnippet)
+		}
+
+		combinedSnippets := strings.Join(pageSnippets, "\n")
+
+		resultContent := lipgloss.JoinVertical(
+			lipgloss.Left,
+			baseWithPath,
+			snippetStyle.Render(combinedSnippets),
+		)
+
+		maxWidth := min(100-2, m.width-6)
+		resultBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("3")).
+			Padding(0, 1).
+			Width(maxWidth)
+
+		content.WriteString(resultBox.Render(resultContent) + "\n")
+	}
+
+	return content.String()
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
