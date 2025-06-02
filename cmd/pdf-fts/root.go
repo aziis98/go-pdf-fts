@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/aziis98/pdf-fts/internal/config"
 	"github.com/aziis98/pdf-fts/internal/database"
+	"github.com/aziis98/pdf-fts/internal/util"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
 )
@@ -22,12 +23,11 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "pdf-fts",
 	Short: "PDF Full-Text Search Tool",
-	Long: `A powerful tool for indexing and searching text content within PDF files.
-It extracts text from PDFs, stores it in a SQLite database with FTS5 support,
-and provides fast full-text search capabilities.
-
-If you are running directly using 'go run', use:
-  go run -tags sqlite_fts5 main.go <command> [options]`,
+	Long: util.Dedent(`
+		A powerful tool for indexing and searching text content within PDF files.
+		It extracts text from PDFs, stores it in a sqlite database with fts5 support,
+		and provides fast full-text search capabilities.
+  	`),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize configuration
 		cfg = config.New()
@@ -81,12 +81,6 @@ If you are running directly using 'go run', use:
 		}
 		return nil
 	},
-}
-
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
-func Execute() error {
-	return rootCmd.Execute()
 }
 
 func init() {

@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aziis98/pdf-fts/internal/util"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +21,7 @@ var (
 var searchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search for text in PDFs",
-	Long: strings.TrimSpace(`
+	Long: util.Dedent(`
 		Search for text content within indexed PDF files using full-text search.
 		Returns matching documents with highlighted snippets showing the search context.
 	`),

@@ -1,4 +1,4 @@
-package cmd
+package main
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/aziis98/pdf-fts/internal/pdf"
+	"github.com/aziis98/pdf-fts/internal/util"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
@@ -16,9 +17,11 @@ import (
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan PDFs and extract text",
-	Long: `Scan a directory for PDF files, extract their text content,
-and store it in the database for full-text search. Only processes
-files that have changed since the last scan unless --force is used.`,
+	Long: util.Dedent(`
+		Scan a directory for PDF files, extract their text content,
+		and store it in the database for full-text search. Only processes
+		files that have changed since the last scan unless --force is used.
+	`),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		folder, _ := cmd.Flags().GetString("folder")
 		force, _ := cmd.Flags().GetBool("force")
