@@ -1,0 +1,5 @@
+/pdf-fts
+*.db*
+*.local*
+
+.venv
