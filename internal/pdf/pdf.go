@@ -8,8 +8,11 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/gen2brain/go-fitz"
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -97,10 +100,21 @@ func (e *Extractor) ExtractText(pdfPath string) (string, error) {
 	return allText.String(), nil
 }
 
+var removeDiacritics = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+
+func normalizeUnicode(s string) string {
+	result, _, err := transform.String(removeDiacritics, s)
+	if err != nil {
+		panic(fmt.Sprintf("normalizing string failed: %v", err))
+	}
+
+	return result
+}
+
 // CleanText normalizes and cleans extracted text
 func (e *Extractor) CleanText(text string) string {
 	// Normalize Unicode
-	text = norm.NFC.String(text)
+	text = normalizeUnicode(text)
 
 	// Replace multiple whitespace with single space
 	text = spaceNormalizer.ReplaceAllString(text, " ")

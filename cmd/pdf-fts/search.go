@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -44,11 +43,10 @@ func runSearchCommand(queryTerm string, limit int) error {
 		log.Printf("Search for: '%s', limit: %d", queryTerm, limit)
 	}
 
-	rows, err := db.Search(queryTerm, limit)
+	searchResults, err := db.Search(queryTerm, limit)
 	if err != nil {
 		return fmt.Errorf("search query failed: %w", err)
 	}
-	defer rows.Close()
 
 	// Define lipgloss styles
 	headerStyle := lipgloss.NewStyle().
@@ -58,9 +56,6 @@ func runSearchCommand(queryTerm string, limit int) error {
 	queryStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("10")).
 		Bold(true)
-
-	separatorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("3"))
 
 	fileStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("3")).
@@ -88,74 +83,77 @@ func runSearchCommand(queryTerm string, limit int) error {
 		Foreground(lipgloss.Color("9")).
 		Bold(true)
 
-	var resultsFound int
+	pageStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("12")).
+		Width(5).
+		Bold(true)
+
+	// Group results by file path while maintaining order
+	type FileResult struct {
+		Path  string
+		Pages []string
+	}
+
+	var groupedResults []FileResult
+	resultMap := make(map[string]*FileResult)
+
+	for _, result := range searchResults {
+		if _, exists := resultMap[result.Path]; !exists {
+			fileResult := FileResult{Path: result.Path, Pages: []string{}}
+			groupedResults = append(groupedResults, fileResult)
+			resultMap[result.Path] = &groupedResults[len(groupedResults)-1]
+		}
+
+		// Process and highlight snippet
+		snippet := strings.ReplaceAll(result.Snippet, "\n", " ")
+		snippet = spaceNormalizer.ReplaceAllString(snippet, " ")
+		highlightedSnippet := highlightMatches(snippet, queryTerm)
+
+		// Format snippet with page number
+		resultMap[result.Path].Pages = append(resultMap[result.Path].Pages,
+			lipgloss.JoinHorizontal(lipgloss.Left,
+				pageStyle.Render(fmt.Sprintf("p.%d", result.PageNum)),
+				" ",
+				lipgloss.NewStyle().
+					Width(90).
+					Render(highlightedSnippet),
+			),
+		)
+	}
+
 	var results []string
+	var resultsFound int
 
 	// Header
 	fmt.Println(headerStyle.Render("Search Results") + " for " + queryStyle.Render("'"+queryTerm+"'"))
-	fmt.Println(separatorStyle.Render(strings.Repeat("═", 100)))
 
-	for rows.Next() {
+	for _, fileResult := range groupedResults {
 		resultsFound++
-		var path, snippet, lastScannedStr string
-		var pageNum int
-		if err := rows.Scan(&path, &pageNum, &snippet, &lastScannedStr); err != nil {
-			fmt.Fprintf(os.Stderr, "Error scanning search result row: %v\n", err)
-			continue
-		}
 
-		// Format filename with page number
-		base := filepath.Base(path)
+		// Format filename
+		base := filepath.Base(fileResult.Path)
 		maxBaseLen := 82 // Reduced to make room for page number
 		if len(base) > maxBaseLen {
 			base = base[:maxBaseLen-3] + "..."
 		}
 
-		pageStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-
-		baseWithPage := fmt.Sprintf("%s %s",
+		baseWithPath := fmt.Sprintf(
+			"%s\n%s",
 			fileStyle.Render(base),
-			pageStyle.Render(fmt.Sprintf("(pag. %d)", pageNum)),
+			pathStyle.Render(filepath.Dir(fileResult.Path)+"/"),
 		)
 
-		// Format directory path
-		dir := filepath.Dir(path) + "/"
-		var pathDisplay string
-		if dir != "." {
-			maxDirLen := 88
-			if len(dir) > maxDirLen {
-				dir = "..." + dir[len(dir)-(maxDirLen-3):]
-			}
-			pathDisplay = pathStyle.Render(dir)
-		}
-
-		// Process and highlight snippet
-		snippet = strings.ReplaceAll(snippet, "\n", " ")
-		snippet = spaceNormalizer.ReplaceAllString(snippet, " ")
-		highlightedSnippet := highlightMatches(snippet, queryTerm)
+		// Combine snippets
+		combinedSnippets := strings.Join(fileResult.Pages, "\n\n")
 
 		// Build result content
-		resultHeader := fmt.Sprintf("%d. %s", resultsFound, baseWithPage)
-		if pathDisplay != "" {
-			// Ensure pathDisplay also respects the width constraints indirectly
-			// by limiting its content length above.
-			resultHeader += "\n   " + pathDisplay
-		}
-
-		// Ensure the content fits within the resultBoxStyle width
-		// Snippet style already has MaxWidth.
-		// Header and dateInfo are typically shorter but their content was also truncated.
 		resultContent := lipgloss.JoinVertical(
 			lipgloss.Left,
-			resultHeader,
-			snippetStyle.Render(highlightedSnippet),
+			baseWithPath,
+			snippetStyle.Render(combinedSnippets),
 		)
 
 		results = append(results, resultBoxStyle.Render(resultContent))
-	}
-
-	if err = rows.Err(); err != nil {
-		return fmt.Errorf("iterating search results: %w", err)
 	}
 
 	// Display all results

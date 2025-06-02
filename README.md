@@ -16,8 +16,6 @@ page-specific results in an interactive TUI or via standard terminal output.
 
     -   `search`: run ad-hoc queries and see page numbers
 
-    -   `live`: interactive real-time search UI
-
 -   Automatic skipping of unchanged files (uses SHA256 hashes)
 
 -   Cross-platform Go implementation with no external dependencies

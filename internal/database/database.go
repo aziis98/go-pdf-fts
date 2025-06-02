@@ -191,9 +191,21 @@ func (db *DB) UpsertPDFData(filePath, hash string, pageContents []string) error 
 	return nil
 }
 
-// Search performs a full-text search and returns results
-func (db *DB) Search(queryTerm string, limit int) (*sql.Rows, error) {
-	return db.Query(
+// Define a struct to hold search results
+type SearchResult struct {
+	Path        string
+	PageNum     int
+	Snippet     string
+	LastScanned string
+}
+
+// Modify the Search method
+func (db *DB) Search(queryTerm string, limit int) ([]SearchResult, error) {
+	if queryTerm == "" {
+		return nil, nil
+	}
+
+	rows, err := db.Query(
 		`
 			SELECT
 				p.path,
@@ -202,30 +214,29 @@ func (db *DB) Search(queryTerm string, limit int) (*sql.Rows, error) {
 				p.last_scanned
 			FROM pdfs_fts
 			JOIN pdfs AS p ON pdfs_fts.path = p.path AND pdfs_fts.page_num = p.page_num
-			WHERE pdfs_fts MATCH ? ORDER BY p.path, p.page_num LIMIT ?;
-		`,
-		queryTerm, limit,
-	)
-}
-
-// LiveSearch performs a search optimized for live/interactive results
-func (db *DB) LiveSearch(queryTerm string, limit int) (*sql.Rows, error) {
-	if queryTerm == "" {
-		return nil, nil
-	}
-
-	return db.Query(
-		`
-			SELECT
-				p.path,
-				p.page_num,
-				snippet(pdfs_fts, 2, '>>>', '<<<', ' ... ', 15) AS snippet
-			FROM pdfs_fts
-			JOIN pdfs AS p ON pdfs_fts.path = p.path AND pdfs_fts.page_num = p.page_num
 			WHERE pdfs_fts MATCH ? ORDER BY rank LIMIT ?;
 		`,
 		queryTerm, limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var result SearchResult
+		if err := rows.Scan(&result.Path, &result.PageNum, &result.Snippet, &result.LastScanned); err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
 
 // RebuildFTS drops and recreates the FTS index

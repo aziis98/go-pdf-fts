@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"io"
-	"log"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -344,35 +343,26 @@ func (m liveSearchModel) queryDBForLiveSearch(queryTerm string, limit int) ([]li
 		return []list.Item{}, nil
 	}
 
-	rows, err := m.db.LiveSearch(queryTerm, limit)
+	searchResults, err := m.db.Search(queryTerm, limit)
 	if err != nil {
-		return nil, fmt.Errorf("live search query failed: %w", err)
+		return nil, fmt.Errorf("search query failed: %w", err)
 	}
-	if rows == nil {
-		return []list.Item{}, nil
-	}
-	defer rows.Close()
 
 	var results []list.Item
-	for rows.Next() {
-		var path, snippet string
-		var pageNum int
-		if err := rows.Scan(&path, &pageNum, &snippet); err != nil {
-			if m.verbose {
-				log.Printf("Error scanning live search result: %v", err)
-			}
-			continue
-		}
+	for _, result := range searchResults {
 		// Further clean snippet from FTS, replace markers with lipgloss styling later
-		snippet = strings.ReplaceAll(snippet, "\n", " ")
+		snippet := strings.ReplaceAll(result.Snippet, "\n", " ")
 		snippet = spaceNormalizer.ReplaceAllString(snippet, " ")
-		snippet = strings.ReplaceAll(snippet, ">>>", "") // Placeholder, actual highlight in delegate
-		snippet = strings.ReplaceAll(snippet, "<<<", "")
+		snippet = strings.ReplaceAll(snippet, "[HL]", "") // Placeholder, actual highlight in delegate
+		snippet = strings.ReplaceAll(snippet, "[/HL]", "")
 
-		results = append(results, searchResultItem{Path: path, PageNum: pageNum, Snippet: strings.TrimSpace(snippet), Query: queryTerm})
+		results = append(results, searchResultItem{
+			Path:    result.Path,
+			PageNum: result.PageNum,
+			Snippet: strings.TrimSpace(snippet),
+			Query:   queryTerm,
+		})
 	}
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating live search results: %w", err)
-	}
+
 	return results, nil
 }
