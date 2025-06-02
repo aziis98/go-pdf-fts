@@ -40,11 +40,6 @@ var (
 			Padding(0, 1)
 	separatorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("3"))
-	resultBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("3")).
-			Padding(0, 1).
-			Width(100 - 2)
 	countStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("10")).
 			Bold(true)
@@ -89,17 +84,18 @@ type pageResult struct {
 }
 
 type liveSearchModel struct {
-	textInput textinput.Model
-	spinner   spinner.Model
-	viewport  viewport.Model
-	searching bool
-	width     int
-	height    int
-	err       error
-	db        *database.DB
-	verbose   bool
-	results   []fileResult
-	query     string
+	textInput           textinput.Model
+	spinner             spinner.Model
+	viewport            viewport.Model
+	searching           bool
+	width               int
+	height              int
+	err                 error
+	db                  *database.DB
+	verbose             bool
+	results             []fileResult
+	lastNonEmptyResults []fileResult
+	query               string
 }
 
 type searchResultsMsg struct {
@@ -128,14 +124,15 @@ func (u *UI) initialLiveSearchModel() liveSearchModel {
 		PaddingRight(2)
 
 	return liveSearchModel{
-		width:     80,
-		textInput: ti,
-		spinner:   s,
-		viewport:  vp,
-		searching: false,
-		db:        u.db,
-		verbose:   u.verbose,
-		results:   []fileResult{},
+		width:               80,
+		textInput:           ti,
+		spinner:             s,
+		viewport:            vp,
+		searching:           false,
+		db:                  u.db,
+		verbose:             u.verbose,
+		results:             []fileResult{},
+		lastNonEmptyResults: []fileResult{},
 	}
 }
 
@@ -188,13 +185,27 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case searchResultsMsg:
 		m.searching = false
-		m.results = msg.results
 		m.query = msg.query
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
 			m.err = nil
 		}
+
+		// Implement heuristic: keep last non-empty results if current search produces no results
+		if len(msg.results) > 0 {
+			// New search has results, use them and save as last non-empty
+			m.results = msg.results
+			m.lastNonEmptyResults = msg.results
+		} else {
+			// New search has no results, keep the last non-empty results if they exist
+			if len(m.lastNonEmptyResults) > 0 {
+				m.results = m.lastNonEmptyResults
+			} else {
+				m.results = []fileResult{}
+			}
+		}
+
 		// Update viewport content and reset to top
 		m.viewport.SetContent(m.renderResults())
 		m.viewport.GotoTop()
@@ -202,8 +213,14 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case searchErrorMsg:
 		m.searching = false
 		m.err = msg.err
-		m.results = []fileResult{}
-		m.viewport.SetContent("")
+		// On error, keep the last non-empty results if they exist
+		if len(m.lastNonEmptyResults) > 0 {
+			m.results = m.lastNonEmptyResults
+			m.viewport.SetContent(m.renderResults())
+		} else {
+			m.results = []fileResult{}
+			m.viewport.SetContent("")
+		}
 		m.viewport.GotoTop()
 	}
 
@@ -217,7 +234,9 @@ func (m liveSearchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	newValue := m.textInput.Value()
 	if oldValue != newValue {
 		if strings.TrimSpace(newValue) == "" {
+			// Force clear results when search bar is empty
 			m.results = []fileResult{}
+			m.lastNonEmptyResults = []fileResult{}
 			m.err = nil
 			m.viewport.SetContent("")
 			m.viewport.GotoTop()
@@ -345,9 +364,22 @@ func (m liveSearchModel) renderResults() string {
 		return ""
 	}
 
-	var content strings.Builder
+	fileStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("3")).
+		Bold(true)
 
-	// Render all results (viewport will handle scrolling)
+	pathStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Italic(true)
+
+	pageStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("12")).
+		Bold(true)
+
+	// First pass: accumulate all result contents
+	var resultContents []string
+	maxWidth := 0
+
 	for _, fileResult := range m.results {
 		// Format filename
 		base := filepath.Base(fileResult.Path)
@@ -356,19 +388,7 @@ func (m liveSearchModel) renderResults() string {
 			base = base[:maxBaseLen-3] + "..."
 		}
 
-		fileStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("3")).
-			Bold(true)
-
-		pathStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Italic(true)
-
-		pageStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("12")).
-			Bold(true)
-
-		baseWithPath := fmt.Sprintf("%s\n   %s",
+		baseWithPath := fmt.Sprintf("%s\n%s",
 			fileStyle.Render(base),
 			pathStyle.Render(filepath.Dir(fileResult.Path)+"/"))
 
@@ -379,13 +399,18 @@ func (m liveSearchModel) renderResults() string {
 			snippet = spaceNormalizer.ReplaceAllString(snippet, " ")
 			highlightedSnippet := m.highlightMatches(snippet, m.query)
 
-			formattedSnippet := fmt.Sprintf("%s: %s",
-				pageStyle.Render(fmt.Sprintf("Page %d", page.PageNum)),
-				highlightedSnippet)
+			// Format snippet with page number using JoinHorizontal like search.go
+			formattedSnippet := lipgloss.JoinHorizontal(lipgloss.Left,
+				pageStyle.Render(fmt.Sprintf("p.%d", page.PageNum)),
+				" ",
+				lipgloss.NewStyle().
+					Width(90).
+					Render(highlightedSnippet),
+			)
 			pageSnippets = append(pageSnippets, formattedSnippet)
 		}
 
-		combinedSnippets := strings.Join(pageSnippets, "\n")
+		combinedSnippets := strings.Join(pageSnippets, "\n\n")
 
 		resultContent := lipgloss.JoinVertical(
 			lipgloss.Left,
@@ -393,13 +418,24 @@ func (m liveSearchModel) renderResults() string {
 			snippetStyle.Render(combinedSnippets),
 		)
 
-		maxWidth := min(100-2, m.width-6)
-		resultBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("3")).
-			Padding(0, 1).
-			Width(maxWidth)
+		resultContents = append(resultContents, resultContent)
 
+		// Calculate width of this result content
+		contentWidth := lipgloss.Width(resultContent)
+		if contentWidth > maxWidth {
+			maxWidth = contentWidth
+		}
+	}
+
+	// Second pass: render all results with consistent box width
+	var content strings.Builder
+	resultBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("3")).
+		Padding(0, 1).
+		Width(maxWidth + 2) // Add padding for border
+
+	for _, resultContent := range resultContents {
 		content.WriteString(resultBox.Render(resultContent) + "\n")
 	}
 
