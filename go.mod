@@ -13,8 +13,6 @@ require (
 	golang.org/x/text v0.25.0
 )
 
-replace github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 => ./patches/lzambarda-pdf
-
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
