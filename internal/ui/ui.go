@@ -279,7 +279,7 @@ func (m liveSearchModel) View() string {
 	content += m.viewport.View()
 
 	// Help text
-	content += "\n\n" + helpStyle.Render("Press ctrl+c/esc to quit • Enter to select (NYI)")
+	content += "\n\n" + helpStyle.Render("Press ctrl+c/esc to quit")
 
 	return docStyle.Render(content)
 }
@@ -440,18 +440,4 @@ func (m liveSearchModel) renderResults() string {
 	}
 
 	return content.String()
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

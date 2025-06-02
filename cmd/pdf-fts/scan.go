@@ -15,52 +15,67 @@ import (
 )
 
 var scanCmd = &cobra.Command{
-	Use:   "scan",
+	Use:   "scan [folders...]",
 	Short: "Scan PDFs and extract text",
 	Long: util.Dedent(`
-		Scan a directory for PDF files, extract their text content,
+		Scan directories for PDF files, extract their text content,
 		and store it in the database for full-text search. Only processes
 		files that have changed since the last scan unless --force is used.
+		
+		If no folders are specified, scans the current directory.
 	`),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		folder, _ := cmd.Flags().GetString("folder")
 		force, _ := cmd.Flags().GetBool("force")
 
-		return runScanCommand(folder, force)
+		folders := args
+		if len(folders) == 0 {
+			folders = []string{"."}
+		}
+
+		return runScanCommand(folders, force)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(scanCmd)
 
-	scanCmd.Flags().StringP("folder", "f", ".", "folder to scan for PDFs")
-	scanCmd.Flags().Bool("force", false, "force re-scan of all PDFs")
+	scanCmd.Flags().BoolP("force", "f", false, "force re-scan of all PDFs")
 }
 
-func runScanCommand(folder string, forceRescan bool) error {
+func runScanCommand(folders []string, forceRescan bool) error {
 	pdfProcessor := pdf.New(cfg.Verbose)
 
 	if cfg.Verbose {
-		log.Printf("Scanning folder: %s (force: %t)", folder, forceRescan)
+		log.Printf("Scanning folders: %v (force: %t)", folders, forceRescan)
 	}
 
 	// Phase 1: PDF Discovery/Crawl
 	fmt.Println("Phase 1: Discovering PDF files...")
-	pdfFiles, err := crawlPDFs(folder)
-	if err != nil {
-		return fmt.Errorf("crawling PDFs: %w", err)
+	var allPdfFiles []string
+	for _, folder := range folders {
+		if cfg.Verbose {
+			log.Printf("Crawling folder: %s", folder)
+		}
+		pdfFiles, err := crawlPDFs(folder)
+		if err != nil {
+			return fmt.Errorf("crawling PDFs in %s: %w", folder, err)
+		}
+		if cfg.Verbose {
+			log.Printf("Found %d PDF files in %s", len(pdfFiles), folder)
+		}
+		allPdfFiles = append(allPdfFiles, pdfFiles...)
 	}
 
-	if len(pdfFiles) == 0 {
+	if len(allPdfFiles) == 0 {
 		fmt.Println("No PDF files found.")
 		return nil
 	}
 
-	fmt.Printf("Found %d PDF files.\n\n", len(pdfFiles))
+	fmt.Printf("Found %d PDF files.\n\n", len(allPdfFiles))
 
 	// Phase 2: Hash Checking
 	fmt.Println("Phase 2: Checking file hashes...")
-	filesToProcess, err := checkHashes(pdfProcessor, pdfFiles, forceRescan)
+	filesToProcess, err := checkHashes(pdfProcessor, allPdfFiles, forceRescan)
 	if err != nil {
 		return fmt.Errorf("checking hashes: %w", err)
 	}
@@ -79,7 +94,7 @@ func runScanCommand(folder string, forceRescan bool) error {
 		return fmt.Errorf("processing PDFs: %w", err)
 	}
 
-	fmt.Printf("\nScan completed. Processed %d PDFs, updated %d entries.\n", len(pdfFiles), processedCount)
+	fmt.Printf("\nScan completed. Processed %d PDFs, updated %d entries.\n", len(allPdfFiles), processedCount)
 	return nil
 }
 
@@ -121,26 +136,35 @@ func crawlPDFs(folder string) ([]string, error) {
 func checkHashes(pdfProcessor *pdf.Extractor, pdfFiles []string, forceRescan bool) ([]PDFFileInfo, error) {
 	var filesToProcess []PDFFileInfo
 
-	// Create progress bar for hash checking
-	bar := progressbar.NewOptions(len(pdfFiles),
-		progressbar.OptionSetDescription("Checking hashes"),
-		progressbar.OptionSetWidth(50),
-		progressbar.OptionShowCount(),
-		progressbar.OptionShowIts(),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "=",
-			SaucerHead:    ">",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
+	// Create progress bar for hash checking (only if not in verbose mode)
+	var bar *progressbar.ProgressBar
+	if !cfg.Verbose {
+		bar = progressbar.NewOptions(len(pdfFiles),
+			progressbar.OptionSetDescription("Checking hashes"),
+			progressbar.OptionSetWidth(50),
+			progressbar.OptionShowCount(),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "=",
+				SaucerHead:    ">",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}))
+	}
 
-	for _, path := range pdfFiles {
+	for i, path := range pdfFiles {
+		if cfg.Verbose {
+			log.Printf("[%d/%d] Checking hash for: %s", i+1, len(pdfFiles), path)
+		}
+
 		// Calculate current file hash
 		currentHash, err := pdfProcessor.HashFile(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to calculate hash for %s: %v\n", path, err)
-			bar.Add(1)
+			if bar != nil {
+				bar.Add(1)
+			}
 			continue
 		}
 
@@ -148,7 +172,9 @@ func checkHashes(pdfProcessor *pdf.Extractor, pdfFiles []string, forceRescan boo
 		storedHash, err := db.GetStoredHash(path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to get stored hash for %s: %v\n", path, err)
-			bar.Add(1)
+			if bar != nil {
+				bar.Add(1)
+			}
 			continue
 		}
 
@@ -156,7 +182,16 @@ func checkHashes(pdfProcessor *pdf.Extractor, pdfFiles []string, forceRescan boo
 
 		if needsUpdate {
 			if cfg.Verbose {
-				log.Printf("File needs processing: %s", path)
+				if storedHash == "" {
+					log.Printf("File is new, will be processed: %s", path)
+				} else if forceRescan {
+					log.Printf("Force rescan enabled, will process: %s", path)
+				} else {
+					log.Printf("File hash changed (stored: %s, current: %s), will be processed: %s",
+						storedHash[:min(8, len(storedHash))],
+						currentHash[:min(8, len(currentHash))],
+						path)
+				}
 			}
 
 			filesToProcess = append(filesToProcess, PDFFileInfo{
@@ -167,14 +202,18 @@ func checkHashes(pdfProcessor *pdf.Extractor, pdfFiles []string, forceRescan boo
 			})
 		} else {
 			if cfg.Verbose {
-				log.Printf("File up to date: %s", path)
+				log.Printf("File up to date (hash: %s): %s", currentHash[:min(8, len(currentHash))], path)
 			}
 		}
 
-		bar.Add(1)
+		if bar != nil {
+			bar.Add(1)
+		}
 	}
 
-	fmt.Println() // New line after progress bar
+	if bar != nil {
+		fmt.Println() // New line after progress bar
+	}
 	return filesToProcess, nil
 }
 
@@ -182,48 +221,63 @@ func checkHashes(pdfProcessor *pdf.Extractor, pdfFiles []string, forceRescan boo
 func processPDFs(pdfProcessor *pdf.Extractor, filesToProcess []PDFFileInfo) (int, error) {
 	processedCount := 0
 
-	// Create progress bar for PDF processing
-	bar := progressbar.NewOptions(len(filesToProcess),
-		progressbar.OptionSetDescription("Processing PDFs"),
-		progressbar.OptionSetWidth(50),
-		progressbar.OptionShowCount(),
-		progressbar.OptionShowIts(),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "=",
-			SaucerHead:    ">",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
+	// Create progress bar for PDF processing (only if not in verbose mode)
+	var bar *progressbar.ProgressBar
+	if !cfg.Verbose {
+		bar = progressbar.NewOptions(len(filesToProcess),
+			progressbar.OptionSetDescription("Processing PDFs"),
+			progressbar.OptionSetWidth(50),
+			progressbar.OptionShowCount(),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "=",
+				SaucerHead:    ">",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}))
+	}
 
-	for _, fileInfo := range filesToProcess {
+	for i, fileInfo := range filesToProcess {
 		if cfg.Verbose {
-			log.Printf("Processing PDF content: %s", fileInfo.Path)
+			log.Printf("[%d/%d] Processing PDF content: %s", i+1, len(filesToProcess), fileInfo.Path)
 		}
 
 		// Extract text content per page
 		pageContents, err := pdfProcessor.ExtractPagesText(fileInfo.Path)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to process %s: %v\n", fileInfo.Path, err)
-			bar.Add(1)
+			if bar != nil {
+				bar.Add(1)
+			}
 			continue
+		}
+
+		if cfg.Verbose {
+			log.Printf("Extracted text from %d pages in: %s", len(pageContents), fileInfo.Path)
 		}
 
 		// Update database
 		if err := db.UpsertPDFData(fileInfo.Path, fileInfo.CurrentHash, pageContents); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to store data for %s: %v\n", fileInfo.Path, err)
-			bar.Add(1)
+			if bar != nil {
+				bar.Add(1)
+			}
 			continue
 		}
 
 		processedCount++
 		if cfg.Verbose {
-			log.Printf("Updated database entry for: %s", fileInfo.Path)
+			log.Printf("Successfully updated database entry for: %s", fileInfo.Path)
 		}
 
-		bar.Add(1)
+		if bar != nil {
+			bar.Add(1)
+		}
 	}
 
-	fmt.Println() // New line after progress bar
+	if bar != nil {
+		fmt.Println() // New line after progress bar
+	}
 	return processedCount, nil
 }
