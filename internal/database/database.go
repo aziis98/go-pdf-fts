@@ -83,7 +83,7 @@ func (db *DB) createFTSTable(exec executor) error {
 			path UNINDEXED,
 			page_num UNINDEXED,
 			content_idx,
-			tokenize = 'unicode61'
+			tokenize = 'trigram'
 		);
 	`
 	if _, err := exec.Exec(ftsTableQuery); err != nil {
@@ -210,7 +210,7 @@ func (db *DB) Search(queryTerm string, limit int) ([]SearchResult, error) {
 			SELECT
 				p.path,
 				p.page_num,
-				snippet(pdfs_fts, 2, '[HL]', '[/HL]', '...', 25) AS snippet,
+				snippet(pdfs_fts, 2, '[HL]', '[/HL]', '...', 140) AS snippet,
 				p.last_scanned
 			FROM pdfs_fts
 			JOIN pdfs AS p ON pdfs_fts.path = p.path AND pdfs_fts.page_num = p.page_num

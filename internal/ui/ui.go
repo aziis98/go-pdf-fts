@@ -439,5 +439,7 @@ func (m liveSearchModel) renderResults() string {
 		content.WriteString(resultBox.Render(resultContent) + "\n")
 	}
 
-	return content.String()
+	return lipgloss.NewStyle().
+		Padding(0, 1).
+		Render(content.String())
 }

@@ -68,6 +68,14 @@ func runScanCommand(folders []string, forceRescan bool) error {
 
 	if len(allPdfFiles) == 0 {
 		fmt.Println("No PDF files found.")
+
+		// Show database file size
+		if dbSize, err := getDatabaseSize(); err == nil {
+			fmt.Printf("Database size: %s\n", formatFileSize(dbSize))
+		} else if cfg.Verbose {
+			log.Printf("Warning: Could not determine database size: %v", err)
+		}
+
 		return nil
 	}
 
@@ -82,6 +90,14 @@ func runScanCommand(folders []string, forceRescan bool) error {
 
 	if len(filesToProcess) == 0 {
 		fmt.Println("All files are up to date. No processing needed.")
+
+		// Show database file size
+		if dbSize, err := getDatabaseSize(); err == nil {
+			fmt.Printf("Database size: %s\n", formatFileSize(dbSize))
+		} else if cfg.Verbose {
+			log.Printf("Warning: Could not determine database size: %v", err)
+		}
+
 		return nil
 	}
 
@@ -95,6 +111,14 @@ func runScanCommand(folders []string, forceRescan bool) error {
 	}
 
 	fmt.Printf("\nScan completed. Processed %d PDFs, updated %d entries.\n", len(allPdfFiles), processedCount)
+
+	// Show database file size
+	if dbSize, err := getDatabaseSize(); err == nil {
+		fmt.Printf("Database size: %s\n", formatFileSize(dbSize))
+	} else if cfg.Verbose {
+		log.Printf("Warning: Could not determine database size: %v", err)
+	}
+
 	return nil
 }
 
@@ -280,4 +304,36 @@ func processPDFs(pdfProcessor *pdf.Extractor, filesToProcess []PDFFileInfo) (int
 		fmt.Println() // New line after progress bar
 	}
 	return processedCount, nil
+}
+
+// getDatabaseSize returns the size of the database file in bytes
+func getDatabaseSize() (int64, error) {
+	dbPath := cfg.DBPath
+	if dbPath == "" {
+		return 0, fmt.Errorf("database path not configured")
+	}
+
+	fileInfo, err := os.Stat(dbPath)
+	if err != nil {
+		return 0, err
+	}
+
+	return fileInfo.Size(), nil
+}
+
+// formatFileSize formats a file size in bytes into a human-readable string
+func formatFileSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	units := []string{"KB", "MB", "GB", "TB"}
+	return fmt.Sprintf("%.1f %s", float64(bytes)/float64(div), units[exp])
 }
