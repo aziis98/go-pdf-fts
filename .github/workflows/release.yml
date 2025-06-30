@@ -50,14 +50,6 @@ jobs:
               run: |
                   GOOS=darwin GOARCH=arm64 go build -tags sqlite_fts5 -o pdf-fts-Darwin-arm64 ./cmd/pdf-fts
 
-            - name: Build for Windows AMD64
-              run: |
-                  GOOS=windows GOARCH=amd64 go build -tags sqlite_fts5 -o pdf-fts-Windows-x86_64.exe ./cmd/pdf-fts
-
-            - name: Build for Windows ARM64
-              run: |
-                  GOOS=windows GOARCH=arm64 go build -tags sqlite_fts5 -o pdf-fts-Windows-arm64.exe ./cmd/pdf-fts
-
             - name: Create Release
               uses: softprops/action-gh-release@v2
               with:
