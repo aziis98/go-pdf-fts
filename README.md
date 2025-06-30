@@ -28,6 +28,21 @@ page-specific results in an interactive TUI or via standard terminal output.
 
 ## Installation
 
+From Github Releases:
+
+```sh
+# For Linux x86_64
+curl -sSL https://github.com/aziis98/pdf-fts/releases/latest/download/pdf-fts-Linux-x86_64 -o /usr/local/bin/pdf-fts && chmod +x /usr/local/bin/pdf-fts
+
+# For macOS x86_64
+curl -sSL https://github.com/aziis98/pdf-fts/releases/latest/download/pdf-fts-Darwin-x86_64 -o /usr/local/bin/pdf-fts && chmod +x /usr/local/bin/pdf-fts
+
+# For macOS ARM64 (Apple Silicon)
+curl -sSL https://github.com/aziis98/pdf-fts/releases/latest/download/pdf-fts-Darwin-arm64 -o /usr/local/bin/pdf-fts && chmod +x /usr/local/bin/pdf-fts
+```
+
+Or using go install:
+
 ```sh
 go install github.com/aziis98/pdf-fts/cmd/pdf-fts@latest
 ```
