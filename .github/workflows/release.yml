@@ -33,57 +33,42 @@ jobs:
 
     build:
         needs: test
-        runs-on: ubuntu-latest
         strategy:
             matrix:
                 include:
-                    - goos: linux
+                    - os: ubuntu-latest
+                      goos: linux
                       goarch: amd64
-                      cc: musl-gcc
                       artifact_name: pdf-fts-Linux-x86_64
+                      cc: musl-gcc
                       setup_script: |
                           sudo apt-get update
                           sudo apt-get install -y --no-install-recommends musl-dev musl-tools
-                    - goos: linux
+                    - os: ubuntu-latest
+                      goos: linux
                       goarch: arm64
-                      cc: aarch64-linux-musl-gcc
                       artifact_name: pdf-fts-Linux-aarch64
+                      cc: aarch64-linux-musl-gcc
                       setup_script: |
                           sudo apt-get update
-                          sudo apt-get install -y --no-install-recommends musl-dev musl-tools
+                          sudo apt-get install -y --no-install-recommends musl-dev musl-tools gcc-aarch64-linux-gnu
                           wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
                           tar -xzf aarch64-linux-musl-cross.tgz
                           echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
-                    - goos: darwin
+                    - os: macos-13
+                      goos: darwin
                       goarch: amd64
-                      cc: x86_64-apple-darwin-clang
                       artifact_name: pdf-fts-Darwin-x86_64
-                      setup_script: |
-                          wget -q https://github.com/messense/homebrew-macos-cross-toolchains/releases/download/v12.2.0/x86_64-apple-darwin20.4-cross.tar.gz
-                          tar -xzf x86_64-apple-darwin20.4-cross.tar.gz
-                          echo "$PWD/x86_64-apple-darwin20.4-cross/bin" >> $GITHUB_PATH
-                    - goos: darwin
+                      cc: clang
+                      setup_script: echo "Using native macOS build environment"
+                    - os: macos-14
+                      goos: darwin
                       goarch: arm64
-                      cc: aarch64-apple-darwin-clang
                       artifact_name: pdf-fts-Darwin-arm64
-                      setup_script: |
-                          wget -q https://github.com/messense/homebrew-macos-cross-toolchains/releases/download/v12.2.0/aarch64-apple-darwin20.4-cross.tar.gz
-                          tar -xzf aarch64-apple-darwin20.4-cross.tar.gz
-                          echo "$PWD/aarch64-apple-darwin20.4-cross/bin" >> $GITHUB_PATH
-                    - goos: windows
-                      goarch: amd64
-                      cc: x86_64-w64-mingw32-gcc
-                      artifact_name: pdf-fts-Windows-x86_64.exe
-                      setup_script: |
-                          sudo apt-get update
-                          sudo apt-get install -y gcc-mingw-w64-x86-64
-                    - goos: windows
-                      goarch: arm64
-                      cc: aarch64-w64-mingw32-gcc
-                      artifact_name: pdf-fts-Windows-arm64.exe
-                      setup_script: |
-                          sudo apt-get update
-                          sudo apt-get install -y gcc-mingw-w64-aarch64
+                      cc: gcc
+                      setup_script: echo "Using native macOS ARM build environment with GCC"
+
+        runs-on: ${{ matrix.os }}
 
         steps:
             - name: Checkout code
@@ -102,20 +87,28 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-go-
 
-            - name: Setup cross-compilation toolchain
+            - name: Setup build environment
+              shell: bash
               run: ${{ matrix.setup_script }}
 
             - name: Download dependencies
               run: go mod download
 
             - name: Build static binary
+              shell: bash
               env:
                   GOOS: ${{ matrix.goos }}
                   GOARCH: ${{ matrix.goarch }}
                   CC: ${{ matrix.cc }}
                   CGO_ENABLED: 1
               run: |
-                  go build -tags sqlite_fts5 -ldflags '-linkmode=external -extldflags=-static' -a -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
+                  if [[ "${{ matrix.goos }}" == "linux" ]]; then
+                      # Linux: Build static binary with musl
+                      go build -tags sqlite_fts5 -ldflags '-linkmode=external -extldflags=-static' -a -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
+                  elif [[ "${{ matrix.goos }}" == "darwin" ]]; then
+                      # macOS: Build with system libraries
+                      go build -tags sqlite_fts5 -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
+                  fi
 
             - name: Upload artifact
               uses: actions/upload-artifact@v4
@@ -141,8 +134,6 @@ jobs:
                       pdf-fts-Linux-aarch64/pdf-fts-Linux-aarch64
                       pdf-fts-Darwin-x86_64/pdf-fts-Darwin-x86_64
                       pdf-fts-Darwin-arm64/pdf-fts-Darwin-arm64
-                      pdf-fts-Windows-x86_64.exe/pdf-fts-Windows-x86_64.exe
-                      pdf-fts-Windows-arm64.exe/pdf-fts-Windows-arm64.exe
                   generate_release_notes: true
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
