@@ -43,7 +43,7 @@ jobs:
                       cc: musl-gcc
                       setup_script: |
                           sudo apt-get update
-                          sudo apt-get install -y --no-install-recommends musl-dev musl-tools
+                          sudo apt-get install -y --no-install-recommends musl-dev musl-tools pkg-config build-essential
                     - os: ubuntu-latest
                       goos: linux
                       goarch: arm64
@@ -104,7 +104,16 @@ jobs:
               run: |
                   if [[ "${{ matrix.goos }}" == "linux" ]]; then
                       # Linux: Build static binary with musl
-                      go build -tags sqlite_fts5 -ldflags '-linkmode=external -extldflags=-static' -a -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
+                      echo "Building for Linux with musl..."
+                      echo "CC: $CC"
+                      echo "GOOS: $GOOS"
+                      echo "GOARCH: $GOARCH"
+                      
+                      # Verify musl-gcc is available
+                      which musl-gcc || echo "musl-gcc not found"
+                      musl-gcc --version || echo "musl-gcc version check failed"
+                      
+                      go build -tags sqlite_fts5 -ldflags '-linkmode=external -extldflags=-static' -a -v -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
                   elif [[ "${{ matrix.goos }}" == "darwin" ]]; then
                       # macOS: Build with system libraries
                       go build -tags sqlite_fts5 -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
