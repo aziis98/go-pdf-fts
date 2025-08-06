@@ -44,30 +44,9 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### Manual Installation
-
-From Github Releases:
-
-```sh
-# For Linux x86_64
-curl -sSL https://github.com/aziis98/pdf-fts/releases/latest/download/pdf-fts-Linux-x86_64 -o /usr/local/bin/pdf-fts && chmod +x /usr/local/bin/pdf-fts
-
-# For macOS x86_64
-curl -sSL https://github.com/aziis98/pdf-fts/releases/latest/download/pdf-fts-Darwin-x86_64 -o /usr/local/bin/pdf-fts && chmod +x /usr/local/bin/pdf-fts
-
-# For macOS ARM64 (Apple Silicon)
-curl -sSL https://github.com/aziis98/pdf-fts/releases/latest/download/pdf-fts-Darwin-arm64 -o /usr/local/bin/pdf-fts && chmod +x /usr/local/bin/pdf-fts
-```
-
 ### Build from Source
 
-Or using go install:
-
-```sh
-go install github.com/aziis98/pdf-fts/cmd/pdf-fts@latest
-```
-
-Or clone and build (requires SQLite FTS5 support):
+Clone and build the project if you want to customize or contribute:
 
 ```sh
 git clone https://github.com/aziis98/pdf-fts.git
@@ -197,3 +176,5 @@ pdf-fts rebuild-fts --verbose
 -   `internal/ui/` - Interactive terminal UI components
 
 -   `scripts/` - Utility scripts for development and testing
+
+    -   `install.sh` - Installation script for end users
