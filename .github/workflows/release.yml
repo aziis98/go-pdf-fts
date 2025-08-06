@@ -6,11 +6,8 @@ on:
             - 'v*'
 
 jobs:
-    release:
+    test:
         runs-on: ubuntu-latest
-        permissions:
-            contents: write
-
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -34,32 +31,118 @@ jobs:
             - name: Run tests
               run: go test -tags sqlite_fts5 -v ./...
 
-            - name: Build for Linux AMD64
-              run: |
-                  GOOS=linux GOARCH=amd64 go build -tags sqlite_fts5 -o pdf-fts-Linux-x86_64 ./cmd/pdf-fts
+    build:
+        needs: test
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                include:
+                    - goos: linux
+                      goarch: amd64
+                      cc: musl-gcc
+                      artifact_name: pdf-fts-Linux-x86_64
+                      setup_script: |
+                          sudo apt-get update
+                          sudo apt-get install -y --no-install-recommends musl-dev musl-tools
+                    - goos: linux
+                      goarch: arm64
+                      cc: aarch64-linux-musl-gcc
+                      artifact_name: pdf-fts-Linux-aarch64
+                      setup_script: |
+                          sudo apt-get update
+                          sudo apt-get install -y --no-install-recommends musl-dev musl-tools
+                          wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
+                          tar -xzf aarch64-linux-musl-cross.tgz
+                          echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+                    - goos: darwin
+                      goarch: amd64
+                      cc: x86_64-apple-darwin-clang
+                      artifact_name: pdf-fts-Darwin-x86_64
+                      setup_script: |
+                          wget -q https://github.com/messense/homebrew-macos-cross-toolchains/releases/download/v12.2.0/x86_64-apple-darwin20.4-cross.tar.gz
+                          tar -xzf x86_64-apple-darwin20.4-cross.tar.gz
+                          echo "$PWD/x86_64-apple-darwin20.4-cross/bin" >> $GITHUB_PATH
+                    - goos: darwin
+                      goarch: arm64
+                      cc: aarch64-apple-darwin-clang
+                      artifact_name: pdf-fts-Darwin-arm64
+                      setup_script: |
+                          wget -q https://github.com/messense/homebrew-macos-cross-toolchains/releases/download/v12.2.0/aarch64-apple-darwin20.4-cross.tar.gz
+                          tar -xzf aarch64-apple-darwin20.4-cross.tar.gz
+                          echo "$PWD/aarch64-apple-darwin20.4-cross/bin" >> $GITHUB_PATH
+                    - goos: windows
+                      goarch: amd64
+                      cc: x86_64-w64-mingw32-gcc
+                      artifact_name: pdf-fts-Windows-x86_64.exe
+                      setup_script: |
+                          sudo apt-get update
+                          sudo apt-get install -y gcc-mingw-w64-x86-64
+                    - goos: windows
+                      goarch: arm64
+                      cc: aarch64-w64-mingw32-gcc
+                      artifact_name: pdf-fts-Windows-arm64.exe
+                      setup_script: |
+                          sudo apt-get update
+                          sudo apt-get install -y gcc-mingw-w64-aarch64
 
-            - name: Build for Linux ARM64
-              run: |
-                  GOOS=linux GOARCH=arm64 go build -tags sqlite_fts5 -o pdf-fts-Linux-aarch64 ./cmd/pdf-fts
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
 
-            - name: Build for macOS AMD64
-              run: |
-                  GOOS=darwin GOARCH=amd64 go build -tags sqlite_fts5 -o pdf-fts-Darwin-x86_64 ./cmd/pdf-fts
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: '1.24'
 
-            - name: Build for macOS ARM64
+            - name: Cache Go modules
+              uses: actions/cache@v4
+              with:
+                  path: ~/go/pkg/mod
+                  key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+                  restore-keys: |
+                      ${{ runner.os }}-go-
+
+            - name: Setup cross-compilation toolchain
+              run: ${{ matrix.setup_script }}
+
+            - name: Download dependencies
+              run: go mod download
+
+            - name: Build static binary
+              env:
+                  GOOS: ${{ matrix.goos }}
+                  GOARCH: ${{ matrix.goarch }}
+                  CC: ${{ matrix.cc }}
+                  CGO_ENABLED: 1
               run: |
-                  GOOS=darwin GOARCH=arm64 go build -tags sqlite_fts5 -o pdf-fts-Darwin-arm64 ./cmd/pdf-fts
+                  go build -tags sqlite_fts5 -ldflags '-linkmode=external -extldflags=-static' -a -o ${{ matrix.artifact_name }} ./cmd/pdf-fts
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ${{ matrix.artifact_name }}
+                  path: ${{ matrix.artifact_name }}
+
+    release:
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+
+        steps:
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
 
             - name: Create Release
               uses: softprops/action-gh-release@v2
               with:
                   files: |
-                      pdf-fts-Linux-x86_64
-                      pdf-fts-Linux-aarch64
-                      pdf-fts-Darwin-x86_64
-                      pdf-fts-Darwin-arm64
-                      pdf-fts-Windows-x86_64.exe
-                      pdf-fts-Windows-arm64.exe
+                      pdf-fts-Linux-x86_64/pdf-fts-Linux-x86_64
+                      pdf-fts-Linux-aarch64/pdf-fts-Linux-aarch64
+                      pdf-fts-Darwin-x86_64/pdf-fts-Darwin-x86_64
+                      pdf-fts-Darwin-arm64/pdf-fts-Darwin-arm64
+                      pdf-fts-Windows-x86_64.exe/pdf-fts-Windows-x86_64.exe
+                      pdf-fts-Windows-arm64.exe/pdf-fts-Windows-arm64.exe
                   generate_release_notes: true
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
