@@ -39,7 +39,7 @@ curl -sSL https://raw.githubusercontent.com/aziis98/pdf-fts/main/install.sh | ba
 Or download and inspect the script first:
 
 ```sh
-curl -sSL https://raw.githubusercontent.com/aziis98/pdf-fts/main/install.sh -o install.sh
+curl -sSL https://raw.githubusercontent.com/aziis98/go-pdf-fts/main/install.sh -o install.sh
 chmod +x install.sh
 ./install.sh
 ```
