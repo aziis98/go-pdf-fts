@@ -33,7 +33,7 @@ page-specific results in an interactive TUI or via standard terminal output.
 Install the latest release automatically:
 
 ```sh
-curl -sSL https://raw.githubusercontent.com/aziis98/pdf-fts/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/aziis98/go-pdf-fts/main/install.sh | bash
 ```
 
 Or download and inspect the script first:
@@ -49,7 +49,7 @@ chmod +x install.sh
 Clone and build the project if you want to customize or contribute:
 
 ```sh
-git clone https://github.com/aziis98/pdf-fts.git
+git clone https://github.com/aziis98/go-pdf-fts.git
 cd pdf-fts
 make build
 ```
