@@ -28,7 +28,7 @@ page-specific results in an interactive TUI or via standard terminal output.
 
 ## Installation
 
-### Quick Install (Recommended)
+### ~~Quick Install~~
 
 Install the latest release automatically:
 
