@@ -4,6 +4,8 @@ A fast, lightweight command-line tool to index and search the text content of
 PDF files on a per-page basis. Uses SQLite FTS for fast queries and displays
 page-specific results in an interactive TUI or via standard terminal output.
 
+https://github.com/user-attachments/assets/ef317664-ed2d-4a50-89f4-3bf9f679c2c4
+
 ## Features
 
 -   Extracts and stores text from each PDF page
